@@ -1,112 +1,112 @@
--- ===== SERVICES =====
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
 
--- ===== SETTINGS =====
-local settings = {
-    ESP = true,
-    TeamCheck = true
-}
-
--- ===== ESP SYSTEM =====
 local ESP = {
-    Instances = {},
-    TeamColor = LocalPlayer.Team and LocalPlayer.Team.TeamColor.Color or Color3.new(1,1,1)
+    Enabled = true,
+    BoxColor = Color3.fromRGB(255, 255, 255),
+    DistanceColor = Color3.fromRGB(255, 255, 255),
+    HealthColors = {
+        Color3.new(0, 1, 0),
+        Color3.new(1, 1, 0),
+        Color3.new(1, 0, 0)
+    },
+    Snapline = true,
+    MaxDistance = 300
 }
 
-local function CreateESP(player)
-    ESP.Instances[player] = {
-        Box = Drawing.new("Quad"),
-        Name = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        HealthBar = Drawing.new("Line")
+local drawings = {}
+
+local function createESP(player)
+    if player == LocalPlayer then return end
+    local esp = {
+        Box = Drawing.new("Square"),
+        Health = Drawing.new("Square"),
+        Line = Drawing.new("Line"),
+        Distance = Drawing.new("Text")
     }
 
-    for _, drawing in pairs(ESP.Instances[player]) do
-        drawing.Visible = false
-        drawing.Color = Color3.new(1, 1, 1)
+    for _, d in pairs(esp) do
+        d.Visible = false
+        if d.Type == "Square" then
+            d.Thickness = 2
+            d.Filled = false
+        end
     end
 
-    ESP.Instances[player].Name.Size = 18
-    ESP.Instances[player].Name.Center = true
-    ESP.Instances[player].Distance.Size = 14
-    ESP.Instances[player].Distance.Center = true
-    ESP.Instances[player].HealthBar.Thickness = 2
+    esp.Distance.Size = 14
+    esp.Distance.Center = true
+    esp.Distance.Color = ESP.DistanceColor
+
+    drawings[player] = esp
 end
 
-local function UpdateESP(player)
-    if not ESP.Instances[player] then
-        CreateESP(player)
-    end
-
-    local esp = ESP.Instances[player]
-    local character = player.Character
-    if not character then
-        for _, drawing in pairs(esp) do
-            drawing.Visible = false
-        end
+local function updateESP(player, esp)
+    if not ESP.Enabled or not player.Character then
+        for _, d in pairs(esp) do d.Visible = false end
         return
     end
 
-    local humanoid = character:FindFirstChild("Humanoid")
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    local head = player.Character:FindFirstChild("Head")
+    if not humanoid or humanoid.Health <= 0 or not head then
+        for _, d in pairs(esp) do d.Visible = false end
+        return
+    end
 
-    if humanoid and humanoid.Health > 0 and rootPart then
-        local screenPos = Camera:WorldToViewportPoint(rootPart.Position)
-        local boxSize = Vector2.new(30, 50) * (20 / screenPos.Z)
-        local color = (settings.TeamCheck and player.Team == LocalPlayer.Team) and Color3.new(0,1,0) or Color3.new(1,0,0)
+    local dist = (head.Position - Camera.CFrame.Position).Magnitude
+    if dist > ESP.MaxDistance then
+        for _, d in pairs(esp) do d.Visible = false end
+        return
+    end
 
-        -- Box
-        esp.Box.PointA = Vector2.new(screenPos.X - boxSize.X, screenPos.Y - boxSize.Y)
-        esp.Box.PointB = Vector2.new(screenPos.X + boxSize.X, screenPos.Y - boxSize.Y)
-        esp.Box.PointC = Vector2.new(screenPos.X + boxSize.X, screenPos.Y + boxSize.Y)
-        esp.Box.PointD = Vector2.new(screenPos.X - boxSize.X, screenPos.Y + boxSize.Y)
-        esp.Box.Color = color
-        esp.Box.Visible = settings.ESP
+    local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+    if not onScreen then
+        for _, d in pairs(esp) do d.Visible = false end
+        return
+    end
 
-        -- Name
-        esp.Name.Position = Vector2.new(screenPos.X, screenPos.Y - boxSize.Y - 20)
-        esp.Name.Text = player.Name
-        esp.Name.Color = color
-        esp.Name.Visible = settings.ESP
+    local scale = 1000 / dist
+    local boxSize = Vector2.new(scale, scale * 1.5)
 
-        -- Distance
-        esp.Distance.Position = Vector2.new(screenPos.X, screenPos.Y + boxSize.Y + 10)
-        esp.Distance.Text = math.floor((rootPart.Position - Camera.CFrame.Position).Magnitude) .. " studs"
-        esp.Distance.Color = color
-        esp.Distance.Visible = settings.ESP
+    esp.Box.Size = boxSize
+    esp.Box.Position = Vector2.new(screenPos.X - boxSize.X / 2, screenPos.Y - boxSize.Y * 0.75)
+    esp.Box.Color = ESP.BoxColor
+    esp.Box.Visible = true
 
-        -- Health Bar
-        local healthPercent = humanoid.Health / humanoid.MaxHealth
-        local healthBarLength = boxSize.X * 2 * healthPercent
-        esp.HealthBar.From = Vector2.new(screenPos.X - boxSize.X, screenPos.Y - boxSize.Y - 5)
-        esp.HealthBar.To = Vector2.new(screenPos.X - boxSize.X + healthBarLength, screenPos.Y - boxSize.Y - 5)
-        esp.HealthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
-        esp.HealthBar.Visible = settings.ESP
+    local healthPercent = humanoid.Health / humanoid.MaxHealth
+    local color = healthPercent > 0.5 and ESP.HealthColors[1] or healthPercent > 0.25 and ESP.HealthColors[2] or ESP.HealthColors[3]
+    esp.Health.Size = Vector2.new(4, boxSize.Y * healthPercent)
+    esp.Health.Position = Vector2.new(esp.Box.Position.X - 6, esp.Box.Position.Y + (boxSize.Y * (1 - healthPercent)))
+    esp.Health.Color = color
+    esp.Health.Visible = true
+
+    esp.Distance.Text = tostring(math.floor(dist)) .. "m"
+    esp.Distance.Position = Vector2.new(screenPos.X, screenPos.Y + boxSize.Y / 2 + 12)
+    esp.Distance.Visible = true
+
+    if ESP.Snapline then
+        esp.Line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+        esp.Line.To = Vector2.new(screenPos.X, screenPos.Y)
+        esp.Line.Color = ESP.BoxColor
+        esp.Line.Visible = true
     else
-        for _, drawing in pairs(esp) do
-            drawing.Visible = false
-        end
+        esp.Line.Visible = false
     end
 end
 
--- ===== MAIN LOOP =====
-RunService.RenderStepped:Connect(function()
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            UpdateESP(player)
-        end
+for _, p in pairs(Players:GetPlayers()) do createESP(p) end
+Players.PlayerAdded:Connect(createESP)
+Players.PlayerRemoving:Connect(function(p)
+    if drawings[p] then
+        for _, d in pairs(drawings[p]) do d:Remove() end
+        drawings[p] = nil
     end
 end)
 
--- Cleanup on leave
-Players.PlayerRemoving:Connect(function(player)
-    if ESP.Instances[player] then
-        for _, drawing in pairs(ESP.Instances[player]) do
-            drawing:Remove()
-        end
-        ESP.Instances[player] = nil
+RunService.RenderStepped:Connect(function()
+    for player, esp in pairs(drawings) do
+        updateESP(player, esp)
     end
 end)
